@@ -1,0 +1,7 @@
+This is the implementation of a Quotient cube and the QC tree in javascript. Read about them in the relevant papers in the docs section.
+
+To see how to use take a look at the spec files in the test directory.
+
+The input is a QC Table which takes in an array of column names and a [][] of data.
+The intermediate output is a Quotient cube for which we use a javascript array as a datastructure.
+The final output is a QC Tree for which we use a javascript object hash as the datastructure.
