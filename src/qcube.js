@@ -382,7 +382,7 @@ QC.Tree.prototype.root = function(dimensionName){
 ////Tree Builder//////////////////////////////////
 QC.TreeBuilder = function(cube, cubeTable, options) {
 	this._options = options || {};
-	this._cubeTable = cubeTable;
+	this._cubeTable = cubeTable ||{};
 	this._cubeTable.meta = {};
 	this._cube = cube;
 	this._cubeData = cube.data();
