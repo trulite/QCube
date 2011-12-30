@@ -133,14 +133,36 @@ QC.arrayForEach = function(fn, arr, objThis) {
 };
 
 
-QC.Table = function (columnNames, data) {
+QC.Table = function (columnNames, data, isArrayOfArrays) {
 	this.columnNames = columnNames;
-	this.data = data;
+	this._data = data;
+	this._isAA = isArrayOfArrays || true;
 };
 
 QC.Table.prototype.dataValue = function (rowIndex, columnName) {
-	var colIndex = this.columnNames.indexOf(columnName);
-	return this.data[rowIndex][colIndex];
+	if(this._isAA){
+		var colIndex = this.columnNames.indexOf(columnName);
+		return this._data[rowIndex][colIndex];
+	}else{
+		return this._data[rowIndex][columnName];
+	}
+};
+
+QC.Table.prototype.dataValueByRowAndColIndex = function (rowIndex, colIndex) {
+	if(this._isAA){
+		return this._data[rowIndex][colIndex];
+	}else{
+		return this._data[rowIndex][this.columnNames[colIndex]];
+	}
+
+};
+
+QC.Table.prototype.row = function (rowIndex) {
+	return this._data[rowIndex];
+};
+
+QC.Table.prototype.getLength = function () {
+	return this._data.length;
 };
 
 QC.OrderedHash = function () {
@@ -484,7 +506,7 @@ QC.Cube = function (baseTable, dimensions, measures) {
 	this._dimensions = dimensions;
 	this._measures = measures;
 	this._baseTable = baseTable;
-	this._btlength = this._baseTable.data.length;
+	this._btlength = this._baseTable.getLength();
 	this._dlength = this._dimensions.length;
 	this._columnNames = QC.Cols.concat(measures);
 	this._tempClasses = [];
@@ -527,7 +549,7 @@ QC.Cube.prototype.values = function () {
 		values = {};
 
 		for(i = 0; i < this._btlength; i++) {
-			row = this._baseTable.data[i];
+			row = this._baseTable.row(i);
 			for(j = 0;j < this._dlength; j++) {
 				dimension = this._dimensions[j];
 				values[dimension] = values[dimension] || [];
@@ -579,7 +601,7 @@ QC.Cube.prototype._indexes = function (partition) {
         for(j=0; j < alength; j++){
 			rowi = partition[j];
 			columni = this._baseTable.columnNames.indexOf(dimension);
-			value = this._baseTable.data[rowi][columni];
+			value = this._baseTable.dataValueByRowAndColIndex(rowi,columni);
 			if(!index.get(value)){
 				index.set(value,[]);
 			}
@@ -773,7 +795,6 @@ QC.Query.prototype.range = function(node, position, cell, results){
 	
 	for(i = position; i < dimLength; i++){
 		dimension = dimensions[i];
-		console.log(this._conditions);
 		values = this._conditions[dimension];
 		if(values !== QC.Star){
 			position = i;
