@@ -4,6 +4,23 @@ QC.Star = '*';
 QC.All = '___all';
 QC.QueryTypes = {point:"point",range:"range"};
 
+QC.minVal = function (a, b) {
+	if(a < b){
+		return a;
+	}else{
+		return b;
+	}
+};
+
+QC.maxVal = function (a, b) {
+	if(a > b){
+		return a;
+	}else{
+		return b;
+	}
+};
+
+
 // Function to merge all of the properties from one object into another
 QC.mergeObjects = function (a, b) {
 	var prop; 
@@ -133,18 +150,19 @@ QC.arrayForEach = function(fn, arr, objThis) {
 };
 
 
-QC.Table = function (columnNames, data, isArrayOfArrays) {
+QC.Table = function (columnNames, data, isJson) {
 	this.columnNames = columnNames;
 	this._data = data;
-	this._isAA = isArrayOfArrays || true;
+	this._isAA = ! isJson;
 };
 
 QC.Table.prototype.dataValue = function (rowIndex, columnName) {
+	var row = this._data[rowIndex];
 	if(this._isAA){
 		var colIndex = this.columnNames.indexOf(columnName);
-		return this._data[rowIndex][colIndex];
+		return row[colIndex];
 	}else{
-		return this._data[rowIndex][columnName];
+		return row[columnName];
 	}
 };
 
@@ -379,23 +397,35 @@ QC.Tree.prototype.root = function(dimensionName){
 	return this._cubeTable.root;
 };
 
+QC.Tree.prototype.rangeForMeasure = function(measureName){
+	return [this._cubeTable.measureMaxAndMin.measureName.MAX,this._cubeTable.measureMaxAndMin.measureName.MIN];
+};
+
+
 ////Tree Builder//////////////////////////////////
 QC.TreeBuilder = function(cube, cubeTable, options) {
 	this._options = options || {};
-	this._cubeTable = cubeTable ||{};
-	this._cubeTable.meta = {};
+
 	this._cube = cube;
 	this._cubeData = cube.data();
 	this._cubeDimensions = cube.dimensions();
 	this._cdlength = this._cubeDimensions.length;
 	this._clength = this._cubeData.length;
-	this._nodeIndex = new QC.OrderedHash();
+
+	this._nodeIndex = [];
+
+	this._cubeTable = cubeTable ||{};
+	this._cubeTable.meta = {};
+	this._cubeTable.measureMaxAndMin = cube.measureMaxAndMin();
 	this._tree = new QC.Tree(this._cubeTable, options);
 };
 
 QC.TreeBuilder.prototype.build = function() {
-	var last, lastBuilt, i, current, lower, child, j, dimension, cnodes;
 	var idIdx = 0, upperIdx = 1, lowerIdx = 2, childIdIdx = 3;
+
+	var last, lastBuilt, i, current, child, childId;
+	var j, dimension, cnodes, currentUpper, lastUpper, currentId, currentLower;
+	
 	if(!this._cubeData || this._cubeData.length === 0){
 		return;
 	}
@@ -403,39 +433,44 @@ QC.TreeBuilder.prototype.build = function() {
 	this._buildRoot();
 	
 	last = QC.cloneArray(this._cubeData[0]);
-	lastBuilt = this._buildNodes(last[upperIdx], last);
+	lastUpper = last[upperIdx];
+	lastBuilt = this._buildNodes(lastUpper, last);
 	if(QC.compactArray(lastBuilt).length === 0){
 		lastBuilt =  [this._tree.nodes.root()];
 	}
-	this._nodeIndex[0] = {'nodes':lastBuilt, 'upper':last[upperIdx]};
+	this._nodeIndex[0] = {'nodes':lastBuilt, 'upper':lastUpper};
 	
 	for(i = 0; i < (this._clength -1); i++){
 		current = this._cubeData[i + 1];
-		
-		if(QC.arrayToString(current[upperIdx]) !== QC.arrayToString(last[upperIdx])){
-			//New upper bound
-			lastBuilt = this._buildNodes(current[upperIdx], current);
-			last = QC.cloneArray(current);
-			this._nodeIndex[current[idIdx]] = {'nodes':lastBuilt, 'upper':last[upperIdx]};
-			
+		currentUpper = current[upperIdx];
+		currentId = current[idIdx];
+		this._nodeIndex[currentId] = {'upper':lastUpper, 'nodes':lastBuilt};
+		if(QC.arrayToString(currentUpper) !== QC.arrayToString(lastUpper)){
+			last = current;
+			lastUpper = last[upperIdx];
+			lastBuilt = this._buildNodes(currentUpper, current);
+			this._nodeIndex[currentId] = {'nodes':lastBuilt, 'upper':lastUpper};
+
 		}else{
-            //# If we've found a new
-            //# upper bound we need to compare the current lower bound
-            //# to the child upper bound, and find out which dimension
-            //# we need to create a link on, once we've done that
-            //# we create a link from the child node to the current
-            //# upper bound node on that dimension
-			lower = current[lowerIdx];
-			child = this._nodeIndex[current[childIdIdx]];
+			//New upper bound
+			//# If we've found a new
+			//# upper bound we need to compare the current lower bound
+			//# to the child upper bound, and find out which dimension
+			//# we need to create a link on, once we've done that
+			//# we create a link from the child node to the current
+			//# upper bound node on that dimension
+			currentLower = current[lowerIdx];
+			childId = current[childIdIdx];
+			child = this._nodeIndex[childId];
 
 			for(j = 0; j < this._cdlength; j++){
 				dimension = this._cubeDimensions[j];
-				if(child.upper[j] === QC.Star && lower[j] !== QC.Star){
+				if(QC.Star === child.upper[j] && QC.Star !== currentLower[j]){
 					cnodes = QC.compactArray(child.nodes);
-					this._buildLink(cnodes[cnodes.length - 1], lastBuilt[j], lower[j], dimension);
+					this._buildLink(cnodes[cnodes.length - 1], lastBuilt[j], currentLower[j], dimension);
 					break;
 				}
-				
+
 			}
 		}
 	}
@@ -510,22 +545,28 @@ QC.Cube = function (baseTable, dimensions, measures) {
 	this._dlength = this._dimensions.length;
 	this._columnNames = QC.Cols.concat(measures);
 	this._tempClasses = [];
+	this._measureMaxAndMin = {};
 	this._values = null;
 };
 QC.Cube.prototype.indexOfColumnName = function (columnName) {
 	return this._columnNames.indexOf(columnName);
 };
 
-QC.Cube.prototype.dimensions = function (aggrCallback) {
+QC.Cube.prototype.dimensions = function () {
 	return this._dimensions;
 };
-QC.Cube.prototype.measures = function (aggrCallback) {
+QC.Cube.prototype.measures = function () {
 	return this._measures;
 };
 
-QC.Cube.prototype.data = function (aggrCallback) {
+QC.Cube.prototype.data = function () {
 	return this._tempClasses;
 };
+
+QC.Cube.prototype.measureMaxAndMin = function () {
+	return this._measureMaxAndMin;
+};
+
 
 QC.Cube.prototype.build = function (aggrCallback) {
 	var cell = [], partition = [], i;
@@ -544,16 +585,15 @@ QC.Cube.prototype.build = function (aggrCallback) {
 };
 
 QC.Cube.prototype.values = function () {
-	var values, i, j, row, dimension, valueKeys, vklength, k, valueKey;
+	var values, i, j, dimension, valueKeys, vklength, k, valueKey;
 	if(!this._values){
 		values = {};
 
 		for(i = 0; i < this._btlength; i++) {
-			row = this._baseTable.row(i);
 			for(j = 0;j < this._dlength; j++) {
 				dimension = this._dimensions[j];
 				values[dimension] = values[dimension] || [];
-				values[dimension].push(row[j]);
+				values[dimension].push(this._baseTable.dataValueByRowAndColIndex(i,j));
 			}
 		}
 		
@@ -574,9 +614,24 @@ QC.Cube.prototype.values = function () {
 
 
 QC.Cube.prototype._sortTempClasses = function () {
-	//console.log("Before sort "+this._tempClasses);
-	//sort by upper;
+	var self = this;
 	this._tempClasses = this._tempClasses.sort(function(a, b) {
+		//First lets get the max for allmeasures.
+		var i = 0, ml = self._measures.length, measureName, mIdx, newMaxVal, newMinVal;
+		for(i = 0; i < ml; i++){
+			measureName = self._measures[i];
+			//temp class data occupy 0 -3 cols.
+			mIdx = 3 + i;
+			self._measureMaxAndMin.measureName = self._measureMaxAndMin.measureName || {};
+			self._measureMaxAndMin.measureName.MAX = self._measureMaxAndMin.measureName.MAX || 0;
+			self._measureMaxAndMin.measureName.MIN = self._measureMaxAndMin.measureName.MIN || 0;
+			newMaxVal = QC.maxVal(a[mIdx], b[mIdx]);
+			newMinVal = QC.minVal(a[mIdx], b[mIdx]);
+			self._measureMaxAndMin.measureName.MAX = QC.maxVal(self._measureMaxAndMin.measureName.MAX, newMaxVal);
+			self._measureMaxAndMin.measureName.MIN = QC.minVal(self._measureMaxAndMin.measureName.MIN, newMinVal);
+		}
+	
+		//now lets sort this data
 		var upperA = QC.arrayToString(a[1]).toLowerCase(), upperB = QC.arrayToString(b[1]).toLowerCase();
 		//sort string ascending
 		if (upperA < upperB){
@@ -587,7 +642,6 @@ QC.Cube.prototype._sortTempClasses = function () {
 		}
 		 return 0; //default return value (no sorting)
 	});
-	//console.log("After sort upper "+this._tempClasses);
 };
 
 QC.Cube.prototype._indexes = function (partition) {
